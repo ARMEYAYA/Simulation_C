@@ -208,15 +208,28 @@ helpClose?.addEventListener('click', ()=> {
 // load instructions: append to next instruction addresses
 loadInstructionBtn.addEventListener('click', ()=>{
   const text = instructionInput.value.trim();
-  if(!text) return;
+  if(!text) {
+    logTask('⚠️ No instructions to load. Please enter instructions first.');
+    return;
+  }
   const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+  
+  let loadedCount = 0;
   for(const l of lines){
     const addr = nextInstructionAddress();
     memory.set(addr, { data: l, source: 'instr' });
+    loadedCount++;
   }
+  
   instructionInput.value = '';
   renderMemory();
-  logTask('Loaded new instruction(s) to memory.');
+  
+  // Reset program counter to start
+  programCounter = 1;
+  instructionCounter = 0;
+  pcField.value = pad(1);
+  
+  logTask(`✅ Loaded ${loadedCount} instruction(s) to memory.`);
 });
 
 // clear instruction textarea
@@ -290,10 +303,10 @@ async function runCycleAt(addr){
   const ins = safe(entry.data);
   instructionCounter++;
 
-  // group lines to append for this instruction
-  const lines = [];
+  const cycleStartTime = performance.now();
 
   // FETCH
+  const fetchStart = performance.now();
   pcField.value = pad(addr);
   marField.value = pad(addr);
   controlUnitLog.textContent = 'Fetching instruction';
@@ -302,24 +315,25 @@ async function runCycleAt(addr){
   // visual: memory + address bus glow
   glow(addrLine, TIM.fetch + 300);
   glow(memoryCard, TIM.fetch + 300);
-  lines.push('Fetching instruction');
-  lines.push(ins);
-  lines.push(`${TIM.fetch}ms`);
-  appendInstructionLog(`Instruction ${instructionCounter}:`, ['--- FETCH ---', `Fetching instruction`, ins, `${TIM.fetch}ms`]);
   await delay(TIM.fetch);
+  const fetchTime = (performance.now() - fetchStart).toFixed(2);
 
   // put into MDR and IR
   mdrField.value = ins;
   irField.value = ins;
+  appendInstructionLog(`Instruction ${instructionCounter}:`, ['--- FETCH ---', `Address: ${pad(addr)}`, `Fetching: ${ins}`, `⏱️ ${fetchTime}ms`]);
 
   // DECODE
+  const decodeStart = performance.now();
   controlUnitLog.textContent = 'Decoded instruction';
   glow(ctrlLine, TIM.decode + 300);
   glow(cpuCard, TIM.decode + 300);
-  appendInstructionLog(`Instruction ${instructionCounter}:`, ['--- DECODE ---', `Decoded: ${ins}`, `${TIM.decode}ms`]);
   await delay(TIM.decode);
+  const decodeTime = (performance.now() - decodeStart).toFixed(2);
+  appendInstructionLog(`Instruction ${instructionCounter}:`, ['--- DECODE ---', `Decoded: ${ins}`, `⏱️ ${decodeTime}ms`]);
 
   // EXECUTE
+  const executeStart = performance.now();
   // show ALU / CU and data bus glow for execute
   controlUnitLog.textContent = 'Executing instruction';
   glow(dataLine, TIM.execute + 300);
@@ -413,8 +427,9 @@ async function runCycleAt(addr){
   // Update ALU log with expression
   aluLog.textContent = aluExpression || 'Executing...';
 
-  appendInstructionLog(`Instruction ${instructionCounter}:`, ['--- EXECUTE ---', execDetails, `${TIM.execute}ms`]);
   await delay(TIM.execute);
+  const executeTime = (performance.now() - executeStart).toFixed(2);
+  appendInstructionLog(`Instruction ${instructionCounter}:`, ['--- EXECUTE ---', execDetails, `⏱️ ${executeTime}ms`]);
 
   // advance program counter (find next instruction address)
   programCounter = addr + 1;
@@ -423,6 +438,9 @@ async function runCycleAt(addr){
 
   // done for this instruction
   await delay(TIM.between);
+  
+  const totalCycleTime = (performance.now() - cycleStartTime).toFixed(2);
+  appendInstructionLog(`Instruction ${instructionCounter}:`, [`✅ Total cycle time: ${totalCycleTime}ms`, `---`]);
 }
 
 // find next instruction (>= start)
@@ -442,11 +460,11 @@ playHeaderBtn.addEventListener('click', async ()=>{
   if(!running){
     running = true;
     playHeaderBtn.textContent = 'Pause';
-    logTask('Execution started.');
+    logTask('🚀 Execution started.');
     while(running){
       const nextAddr = findNextInstructionFrom(programCounter);
       if(nextAddr === null){
-        logTask('No more instructions to execute.');
+        logTask('✅ No more instructions to execute.');
         running = false;
         playHeaderBtn.textContent = 'Play';
         break;
@@ -456,7 +474,7 @@ playHeaderBtn.addEventListener('click', async ()=>{
   } else {
     running = false;
     playHeaderBtn.textContent = 'Play';
-    logTask('Execution paused.');
+    logTask('⏸️ Execution paused.');
   }
 });
 
@@ -465,12 +483,13 @@ stopHeaderBtn.addEventListener('click', ()=>{
   running = false;
   playHeaderBtn.textContent = 'Play';
   programCounter = 1;
+  instructionCounter = 0;
   pcField.value = pad(programCounter);
   irField.value = mdrField.value = marField.value = accField.value = '';
   r1.value = r2.value = r3.value = '0';
   controlUnitLog.textContent = 'Stopped';
   aluLog.textContent = 'Ready...';
-  logTask('Execution stopped and registers reset (memory preserved).');
+  logTask('⏹️ Execution stopped and registers reset (memory preserved).');
 });
 
 // initialization
